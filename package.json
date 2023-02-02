@@ -2,7 +2,7 @@
     "name": "neos-translation-server",
     "version": "1.0.0",
     "description": "",
-    "main": "js/index.js",
+    "main": "js/index.mjs",
     "scripts": {
         "start": "node . --enable-source-maps",
         "dev": "tsc --watch",
