@@ -2,7 +2,7 @@ import "dotenv/config";
 
 import { WebSocket, WebSocketServer } from "ws";
 import { Translate } from "@google-cloud/translate/build/src/v2/index.js";
-import { WSPacket } from "./websocketPackets.mjs";
+import { WSPacket } from "./websocketPackets.js";
 import { EventEmitter } from "events";
 
 const wss = new WebSocketServer({
