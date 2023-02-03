@@ -46,7 +46,18 @@ export function createWebSocketServer(
             return;
         }
 
-        switch (url.pathname) {
+        if (!url.pathname.startsWith("/ws/")) {
+            ws.close(1002, "Invalid pathname.");
+            return;
+        }
+
+        const endpoint = url.pathname.split("/", 1);
+        if (endpoint.length != 2) {
+            ws.close(1002, "Invalid pathname");
+            return;
+        }
+
+        switch (endpoint[1]) {
             case "/speech":
                 // This is the speech recognition client connecting to send text to translate.
                 initSpeechRecognitionClient(ws, url, targetUser);
