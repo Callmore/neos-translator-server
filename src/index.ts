@@ -6,8 +6,8 @@ import { WSPacket } from "./websocketPackets.js";
 import { EventEmitter } from "events";
 
 export function createWebSocketServer(
-    options: ServerOptions | undefined,
-    callback: (() => void) | undefined
+    options?: ServerOptions | undefined,
+    callback?: (() => void) | undefined
 ) {
     const wss = new WebSocketServer(options, callback);
 
