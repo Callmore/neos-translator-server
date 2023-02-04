@@ -2,7 +2,7 @@ import "dotenv/config";
 
 import { ServerOptions, WebSocket, WebSocketServer } from "ws";
 import { Translate } from "@google-cloud/translate/build/src/v2/index.js";
-import { WSPacket } from "./websocketPackets.js";
+import { WSPacket, WSPacketHeartBeat } from "./websocketPackets.js";
 import { EventEmitter } from "events";
 
 const validLanguages = {
@@ -118,6 +118,18 @@ function initSpeechRecognitionClient(
             ws.close(1002, "Invalid request.");
         }
     });
+
+    const heartBeatCallback = setInterval(() => {
+        ws.send(
+            JSON.stringify({
+                type: "heartBeat",
+            } as WSPacketHeartBeat)
+        );
+    }, 10000);
+
+    ws.on("close", () => {
+        clearInterval(heartBeatCallback);
+    });
 }
 
 async function parseIncommingPacket(
@@ -164,6 +176,10 @@ async function parseIncommingPacket(
             // It must be valid... right?
             languageFrom = data.langFrom;
             languageTo = data.langTo;
+
+        case "heartBeat":
+            // yay!
+            break;
 
         default:
             ws.close(1002, "Invalid packet type.");
@@ -244,6 +260,10 @@ export function createWebSocketServer(
         neosConnectionEvents.on(`partial-${targetUser}`, partialSend);
         neosConnectionEvents.on(`final-${targetUser}`, finalSend);
 
+        const heartBeatCallback = setInterval(() => {
+            ws.send("heartbeat\n");
+        }, 10000);
+
         ws.on("close", () => {
             neosConnectionEvents.removeListener(
                 `partial-${targetUser}`,
@@ -253,6 +273,8 @@ export function createWebSocketServer(
                 `final-${targetUser}`,
                 finalSend
             );
+
+            clearInterval(heartBeatCallback);
         });
     }
 }

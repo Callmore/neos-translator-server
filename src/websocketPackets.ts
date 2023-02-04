@@ -14,7 +14,12 @@ export interface WSPacketChangeLanguage {
     langTo: string;
 }
 
+export interface WSPacketHeartBeat {
+    type: "heartBeat";
+}
+
 export type WSPacket =
     | WSPacketPartialRecognition
     | WSPacketFinalRecognition
-    | WSPacketChangeLanguage;
+    | WSPacketChangeLanguage
+    | WSPacketHeartBeat;
