@@ -68,16 +68,16 @@ function neosEscape(text: string) {
     return output.join("");
 }
 
-// const translate = new Translate();
+const translate = new Translate();
 
 async function translateText(text: string, langFrom: string, langTo: string) {
-    // const result = await translate.translate(text, {
-    //     from: langFrom,
-    //     to: langTo,
-    // });
+    const result = await translate.translate(text, {
+        from: langFrom,
+        to: langTo,
+    });
 
-    // return result[0];
-    return new Promise<string>((resolve) => resolve(text.toUpperCase()));
+    return result[0];
+    // return new Promise<string>((resolve) => resolve(text.toUpperCase()));
 }
 
 function initSpeechRecognitionClient(
