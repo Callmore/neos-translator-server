@@ -4,6 +4,7 @@ import { ServerOptions, WebSocket, WebSocketServer } from "ws";
 import { Translate } from "@google-cloud/translate/build/src/v2/index.js";
 import { WSPacket, WSPacketHeartBeat } from "./websocketPackets.js";
 import { EventEmitter } from "events";
+import { RateLimitBucket } from "./rateLimitBucket.js";
 
 const validLanguages = {
     en: true,
@@ -77,7 +78,6 @@ async function translateText(text: string, langFrom: string, langTo: string) {
     });
 
     return result[0];
-    // return new Promise<string>((resolve) => resolve(text.toUpperCase()));
 }
 
 function initSpeechRecognitionClient(
@@ -88,21 +88,22 @@ function initSpeechRecognitionClient(
 ) {
     let languageFrom = url.searchParams.get("langfrom")!;
     if (languageFrom == undefined || !isValidLanguage(languageFrom)) {
-        ws.close(1002, "langfrom query parameter missing or invalid.");
+        ws.close(4001, "langfrom query parameter missing or invalid.");
         return;
     }
 
     let languageTo = url.searchParams.get("langto")!;
     if (languageTo == undefined || !isValidLanguage(languageTo)) {
-        ws.close(1002, "langto query parameter missing or undefined.");
+        ws.close(4001, "langto query parameter missing or undefined.");
         return;
     }
 
     if (languageFrom == languageTo) {
-        ws.close(1002, "langfrom and langto are the same.");
+        ws.close(4001, "langfrom and langto are the same.");
         return;
     }
 
+    const rateLimitBucket = new RateLimitBucket();
     ws.on("message", async (message) => {
         try {
             const data = JSON.parse(message.toString()) as WSPacket;
@@ -112,10 +113,11 @@ function initSpeechRecognitionClient(
                 languageFrom,
                 languageTo,
                 ws,
-                connectionEvents
+                connectionEvents,
+                rateLimitBucket
             ));
         } catch (e) {
-            ws.close(1002, "Invalid request.");
+            ws.close(4001, "Invalid request.");
         }
     });
 
@@ -138,7 +140,8 @@ async function parseIncommingPacket(
     languageFrom: string,
     languageTo: string,
     ws: WebSocket,
-    connectionEvents: EventEmitter
+    connectionEvents: EventEmitter,
+    rateLimitBucket: RateLimitBucket
 ) {
     switch (data.type) {
         case "partialRecognition":
@@ -151,6 +154,12 @@ async function parseIncommingPacket(
 
         case "finalRecognition":
             if (connectionEvents.listenerCount(`final-${targetUser}`) <= 0) {
+                break;
+            }
+
+            rateLimitBucket.add(data.text.length);
+            if (rateLimitBucket.hasTrippedRateLimit()) {
+                ws.close(4001, "Rate limit reached.");
                 break;
             }
 
@@ -176,6 +185,7 @@ async function parseIncommingPacket(
             // It must be valid... right?
             languageFrom = data.langFrom;
             languageTo = data.langTo;
+            break;
 
         case "heartBeat":
             // yay!
