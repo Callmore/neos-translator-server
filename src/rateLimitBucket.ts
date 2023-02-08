@@ -9,7 +9,7 @@ export class RateLimitBucket {
 
     constructor(
         private limitPerMessage = 200,
-        private limitOverTime = 300,
+        private limitOverTime = 500,
         private limitTimeFrame = 30000
     ) {}
 

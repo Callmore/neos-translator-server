@@ -2,7 +2,11 @@ import "dotenv/config";
 
 import { ServerOptions, WebSocket, WebSocketServer } from "ws";
 import { Translate } from "@google-cloud/translate/build/src/v2/index.js";
-import { WSPacket, WSPacketHeartBeat } from "./websocketPackets.js";
+import {
+    WSPacket,
+    WSPacketHeartBeat,
+    WSPacketInfo,
+} from "./websocketPackets.js";
 import { EventEmitter } from "events";
 import { RateLimitBucket } from "./rateLimitBucket.js";
 
@@ -69,6 +73,8 @@ function neosEscape(text: string) {
     return output.join("");
 }
 
+const connectionEventManager = new EventEmitter();
+
 const translate = new Translate();
 
 async function translateText(text: string, langFrom: string, langTo: string) {
@@ -77,14 +83,15 @@ async function translateText(text: string, langFrom: string, langTo: string) {
         to: langTo,
     });
 
+    console.log(result[1]);
+
     return result[0];
 }
 
 function initSpeechRecognitionClient(
     ws: WebSocket,
     url: URL,
-    targetUser: string,
-    connectionEvents: EventEmitter
+    targetUser: string
 ) {
     let languageFrom = url.searchParams.get("langfrom")!;
     if (languageFrom == undefined || !isValidLanguage(languageFrom)) {
@@ -113,7 +120,6 @@ function initSpeechRecognitionClient(
                 languageFrom,
                 languageTo,
                 ws,
-                connectionEvents,
                 rateLimitBucket
             ));
         } catch (e) {
@@ -129,8 +135,23 @@ function initSpeechRecognitionClient(
         );
     }, 10000);
 
+    function onInfoMessageEmited(msg: string) {
+        ws.send(
+            JSON.stringify({
+                type: "info",
+                msg,
+            } as WSPacketInfo)
+        );
+    }
+    connectionEventManager.on(`info-${targetUser}`, onInfoMessageEmited);
+
     ws.on("close", () => {
         clearInterval(heartBeatCallback);
+
+        connectionEventManager.removeListener(
+            `info-${targetUser}`,
+            onInfoMessageEmited
+        );
     });
 }
 
@@ -140,20 +161,24 @@ async function parseIncommingPacket(
     languageFrom: string,
     languageTo: string,
     ws: WebSocket,
-    connectionEvents: EventEmitter,
     rateLimitBucket: RateLimitBucket
 ) {
     switch (data.type) {
         case "partialRecognition":
-            if (connectionEvents.listenerCount(`partial-${targetUser}`) <= 0) {
+            if (
+                connectionEventManager.listenerCount(`partial-${targetUser}`) <=
+                0
+            ) {
                 break;
             }
 
-            connectionEvents.emit(`partial-${targetUser}`, data.text);
+            connectionEventManager.emit(`partial-${targetUser}`, data.text);
             break;
 
         case "finalRecognition":
-            if (connectionEvents.listenerCount(`final-${targetUser}`) <= 0) {
+            if (
+                connectionEventManager.listenerCount(`final-${targetUser}`) <= 0
+            ) {
                 break;
             }
 
@@ -169,7 +194,11 @@ async function parseIncommingPacket(
                 languageTo
             );
 
-            connectionEvents.emit(`final-${targetUser}`, data.text, translated);
+            connectionEventManager.emit(
+                `final-${targetUser}`,
+                data.text,
+                translated
+            );
             break;
 
         case "changeLanguage":
@@ -197,13 +226,37 @@ async function parseIncommingPacket(
     return { languageFrom, languageTo };
 }
 
+function initNeosListener(ws: WebSocket, targetUser: string | null) {
+    const partialSend = (text: string) => {
+        ws.send(`partial\n${neosEscape(text)}`);
+    };
+    const finalSend = (text: string, translatedText: string) => {
+        ws.send(`final\n${neosEscape(text)}\n${neosEscape(translatedText)}`);
+    };
+
+    connectionEventManager.on(`partial-${targetUser}`, partialSend);
+    connectionEventManager.on(`final-${targetUser}`, finalSend);
+
+    const heartBeatCallback = setInterval(() => {
+        ws.send("heartbeat\n");
+    }, 10000);
+
+    ws.on("close", () => {
+        connectionEventManager.removeListener(
+            `partial-${targetUser}`,
+            partialSend
+        );
+        connectionEventManager.removeListener(`final-${targetUser}`, finalSend);
+
+        clearInterval(heartBeatCallback);
+    });
+}
+
 export function createWebSocketServer(
     options?: ServerOptions | undefined,
     callback?: (() => void) | undefined
 ) {
     const wss = new WebSocketServer(options, callback);
-
-    const neosConnectionEvents = new EventEmitter();
 
     wss.on("connection", (ws, request) => {
         if (request.url == undefined) {
@@ -237,12 +290,7 @@ export function createWebSocketServer(
         switch ("/" + endpoint.slice(2).join("/")) {
             case "/speech":
                 // This is the speech recognition client connecting to send text to translate.
-                initSpeechRecognitionClient(
-                    ws,
-                    url,
-                    targetUser,
-                    neosConnectionEvents
-                );
+                initSpeechRecognitionClient(ws, url, targetUser);
                 break;
 
             case "/neos":
@@ -256,35 +304,4 @@ export function createWebSocketServer(
                 break;
         }
     });
-
-    function initNeosListener(ws: WebSocket, targetUser: string | null) {
-        const partialSend = (text: string) => {
-            ws.send(`partial\n${neosEscape(text)}`);
-        };
-        const finalSend = (text: string, translatedText: string) => {
-            ws.send(
-                `final\n${neosEscape(text)}\n${neosEscape(translatedText)}`
-            );
-        };
-
-        neosConnectionEvents.on(`partial-${targetUser}`, partialSend);
-        neosConnectionEvents.on(`final-${targetUser}`, finalSend);
-
-        const heartBeatCallback = setInterval(() => {
-            ws.send("heartbeat\n");
-        }, 10000);
-
-        ws.on("close", () => {
-            neosConnectionEvents.removeListener(
-                `partial-${targetUser}`,
-                partialSend
-            );
-            neosConnectionEvents.removeListener(
-                `final-${targetUser}`,
-                finalSend
-            );
-
-            clearInterval(heartBeatCallback);
-        });
-    }
 }
