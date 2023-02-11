@@ -1,14 +1,13 @@
 import "dotenv/config";
 
 import { ServerOptions, WebSocket, WebSocketServer } from "ws";
-import { Translate } from "@google-cloud/translate/build/src/v2/index.js";
 import {
     WSPacket,
     WSPacketHeartBeat,
     WSPacketInfo,
-} from "./websocketPackets.js";
+} from "./websocketPackets.mjs";
 import { EventEmitter } from "events";
-import { RateLimitBucket } from "./rateLimitBucket.js";
+import { RateLimitBucket } from "./rateLimitBucket.mjs";
 
 const validLanguages = {
     en: true,
@@ -75,19 +74,6 @@ function neosEscape(text: string) {
 
 const connectionEventManager = new EventEmitter();
 
-const translate = new Translate();
-
-async function translateText(text: string, langFrom: string, langTo: string) {
-    const result = await translate.translate(text, {
-        from: langFrom,
-        to: langTo,
-    });
-
-    console.log(result[1]);
-
-    return result[0];
-}
-
 function initSpeechRecognitionClient(
     ws: WebSocket,
     url: URL,
@@ -110,17 +96,15 @@ function initSpeechRecognitionClient(
         return;
     }
 
-    const rateLimitBucket = new RateLimitBucket();
     ws.on("message", async (message) => {
         try {
             const data = JSON.parse(message.toString()) as WSPacket;
-            ({ languageFrom, languageTo } = await parseIncommingPacket(
+            ({ languageFrom, languageTo } = parseIncommingPacket(
                 data,
                 targetUser,
                 languageFrom,
                 languageTo,
-                ws,
-                rateLimitBucket
+                ws
             ));
         } catch (e) {
             ws.close(4001, "Invalid request.");
@@ -155,13 +139,12 @@ function initSpeechRecognitionClient(
     });
 }
 
-async function parseIncommingPacket(
+function parseIncommingPacket(
     data: WSPacket,
     targetUser: string | null,
     languageFrom: string,
     languageTo: string,
-    ws: WebSocket,
-    rateLimitBucket: RateLimitBucket
+    ws: WebSocket
 ) {
     switch (data.type) {
         case "partialRecognition":
@@ -182,22 +165,10 @@ async function parseIncommingPacket(
                 break;
             }
 
-            rateLimitBucket.add(data.text.length);
-            if (rateLimitBucket.hasTrippedRateLimit()) {
-                ws.close(4001, "Rate limit reached.");
-                break;
-            }
-
-            const translated = await translateText(
-                data.text,
-                languageFrom,
-                languageTo
-            );
-
             connectionEventManager.emit(
                 `final-${targetUser}`,
-                data.text,
-                translated
+                data.origanal,
+                data.translated
             );
             break;
 
@@ -264,7 +235,6 @@ export function createWebSocketServer(
             return;
         }
 
-        console.log(request.url);
         const url = new URL(request.url, "a:/");
 
         const targetUser = url.searchParams.get("userid");
@@ -304,4 +274,6 @@ export function createWebSocketServer(
                 break;
         }
     });
+
+    return wss;
 }

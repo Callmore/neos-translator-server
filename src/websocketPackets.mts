@@ -5,7 +5,8 @@ export interface WSPacketPartialRecognition {
 
 export interface WSPacketFinalRecognition {
     type: "finalRecognition";
-    text: string;
+    origanal: string;
+    translated: string;
 }
 
 export interface WSPacketChangeLanguage {
