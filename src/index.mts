@@ -7,19 +7,6 @@ import {
     WSPacketInfo,
 } from "./websocketPackets.mjs";
 import { EventEmitter } from "events";
-import { RateLimitBucket } from "./rateLimitBucket.mjs";
-
-const validLanguages = {
-    en: true,
-    ja: true,
-    ko: true,
-    ru: true,
-    zh: true,
-    fr: true,
-};
-function isValidLanguage(lang: string) {
-    return Object.hasOwn(validLanguages, lang);
-}
 
 const escapedCharacters = {
     ".": true,
@@ -79,33 +66,10 @@ function initSpeechRecognitionClient(
     url: URL,
     targetUser: string
 ) {
-    let languageFrom = url.searchParams.get("langfrom")!;
-    if (languageFrom == undefined || !isValidLanguage(languageFrom)) {
-        ws.close(4001, "langfrom query parameter missing or invalid.");
-        return;
-    }
-
-    let languageTo = url.searchParams.get("langto")!;
-    if (languageTo == undefined || !isValidLanguage(languageTo)) {
-        ws.close(4001, "langto query parameter missing or undefined.");
-        return;
-    }
-
-    if (languageFrom == languageTo) {
-        ws.close(4001, "langfrom and langto are the same.");
-        return;
-    }
-
     ws.on("message", async (message) => {
         try {
             const data = JSON.parse(message.toString()) as WSPacket;
-            ({ languageFrom, languageTo } = parseIncommingPacket(
-                data,
-                targetUser,
-                languageFrom,
-                languageTo,
-                ws
-            ));
+            parseIncommingPacket(data, targetUser, ws);
         } catch (e) {
             ws.close(4001, "Invalid request.");
         }
@@ -119,22 +83,38 @@ function initSpeechRecognitionClient(
         );
     }, 10000);
 
-    function onInfoMessageEmited(msg: string) {
+    const onNeosInfoMessageEmited = (msg: string) => {
         ws.send(
             JSON.stringify({
                 type: "info",
                 msg,
             } as WSPacketInfo)
         );
-    }
-    connectionEventManager.on(`info-${targetUser}`, onInfoMessageEmited);
+    };
+    // TODO: add info event emiiters
+    connectionEventManager.on(
+        `info-neos-${targetUser}`,
+        onNeosInfoMessageEmited
+    );
 
     ws.on("close", () => {
+        connectionEventManager.emit(
+            `info-recognition-${targetUser}`,
+            "Speech recognition connection lost."
+        );
+
         clearInterval(heartBeatCallback);
 
         connectionEventManager.removeListener(
-            `info-${targetUser}`,
-            onInfoMessageEmited
+            `info-neos-${targetUser}`,
+            onNeosInfoMessageEmited
+        );
+    });
+
+    ws.on("open", () => {
+        connectionEventManager.emit(
+            `info-recognition-${targetUser}`,
+            "Speech recognition connected."
         );
     });
 }
@@ -142,8 +122,6 @@ function initSpeechRecognitionClient(
 function parseIncommingPacket(
     data: WSPacket,
     targetUser: string | null,
-    languageFrom: string,
-    languageTo: string,
     ws: WebSocket
 ) {
     switch (data.type) {
@@ -172,21 +150,6 @@ function parseIncommingPacket(
             );
             break;
 
-        case "changeLanguage":
-            // Check that the data is valid
-            if (
-                !isValidLanguage(data.langFrom) ||
-                !isValidLanguage(data.langTo)
-            ) {
-                ws.close(1002, "Invalid language.");
-                break;
-            }
-
-            // It must be valid... right?
-            languageFrom = data.langFrom;
-            languageTo = data.langTo;
-            break;
-
         case "heartBeat":
             // yay!
             break;
@@ -194,32 +157,56 @@ function parseIncommingPacket(
         default:
             ws.close(1002, "Invalid packet type.");
     }
-    return { languageFrom, languageTo };
+    return;
 }
 
 function initNeosListener(ws: WebSocket, targetUser: string | null) {
     const partialSend = (text: string) => {
         ws.send(`partial\n${neosEscape(text)}`);
     };
+    connectionEventManager.on(`partial-${targetUser}`, partialSend);
+
     const finalSend = (text: string, translatedText: string) => {
         ws.send(`final\n${neosEscape(text)}\n${neosEscape(translatedText)}`);
     };
-
-    connectionEventManager.on(`partial-${targetUser}`, partialSend);
     connectionEventManager.on(`final-${targetUser}`, finalSend);
+
+    const onRecognitionInfoMessageEmitted = (msg: string) => {
+        ws.send(`info\n${neosEscape(msg)}`);
+    };
+    connectionEventManager.on(
+        `info-recognition-${targetUser}`,
+        onRecognitionInfoMessageEmitted
+    );
 
     const heartBeatCallback = setInterval(() => {
         ws.send("heartbeat\n");
     }, 10000);
 
     ws.on("close", () => {
+        connectionEventManager.emit(
+            `info-neos-${targetUser}`,
+            "Neos connection lost."
+        );
+
         connectionEventManager.removeListener(
             `partial-${targetUser}`,
             partialSend
         );
         connectionEventManager.removeListener(`final-${targetUser}`, finalSend);
+        connectionEventManager.removeListener(
+            `info-recognition-${targetUser}`,
+            onRecognitionInfoMessageEmitted
+        );
 
         clearInterval(heartBeatCallback);
+    });
+
+    ws.on("open", () => {
+        connectionEventManager.emit(
+            `info-neos-${targetUser}`,
+            "Neos connected."
+        );
     });
 }
 

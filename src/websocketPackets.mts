@@ -9,11 +9,6 @@ export interface WSPacketFinalRecognition {
     translated: string;
 }
 
-export interface WSPacketChangeLanguage {
-    type: "changeLanguage";
-    langFrom: string;
-    langTo: string;
-}
 
 export interface WSPacketHeartBeat {
     type: "heartBeat";
@@ -27,6 +22,5 @@ export interface WSPacketInfo {
 export type WSPacket =
     | WSPacketPartialRecognition
     | WSPacketFinalRecognition
-    | WSPacketChangeLanguage
     | WSPacketHeartBeat
     | WSPacketInfo;
